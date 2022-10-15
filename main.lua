@@ -61,7 +61,7 @@ local objects = {
     },
 }
 
-local res = 10
+local res = 3
 
 local worg,horg = love.graphics.getDimensions()
 love.window.setMode(worg,horg,{resizable=true})
@@ -94,6 +94,22 @@ local function transform_screen_space(p,w,h)
         p[5]*inverse_z,
         p[6]*inverse_z
     }
+end
+
+local function cull(a,b,c)
+    local i1,i2,i3 = a[1],a[2],a[4]
+
+    local a1 = b[1]-i1
+    local a2 = b[2]-i2
+    local a3 = b[4]-i3
+
+    local b1 = c[1]-i1
+    local b2 = c[2]-i2
+    local b3 = c[4]-i3
+
+    return (a2*b3 - a3*b2)*i1+
+        (a3*b1 - a1*b3)   *i2+
+        (a1*b2 - a2*b1)   *i3
 end
 
 local function makePerspective(w,h,n,f,fov)
@@ -335,7 +351,7 @@ local function clip_1_vertex(tris,v1,v2,v3)
     local v01 = interpolate_vertex(v1,v3,alpha2)
 
     tris[#tris+1] = {v10,v2,v3,split=true}
-    tris[#tris+1] = {v10,v01,v3,split=true}
+    tris[#tris+1] = {v3,v01,v10,split=true}
 end
 
 local function clip_2_vertices(tris,v1,v2,v3)
@@ -345,7 +361,7 @@ local function clip_2_vertices(tris,v1,v2,v3)
     local v10 = interpolate_vertex(v1,v3,alpha1)
     local v01 = interpolate_vertex(v2,v3,alpha2)
 
-    tris[#tris+1] = {v10,v01,v3,split=true}
+    tris[#tris+1] = {v3,v01,v10,split=true}
 end
 
 local function handle_triangle(tri_list,a,b,c)
@@ -432,15 +448,17 @@ function love.draw()
         for i=1,#triangles do
             local t = triangles[i]
             local a,b,c = t[1],t[2],t[3]
-            raster_triangle(
-                transform_screen_space(a,w,h),
-                transform_screen_space(b,w,h),
-                transform_screen_space(c,w,h),
-                {tex=tex,w=tex:getWidth(),h=tex:getHeight()},
-                function(x,y,z,tx,ty,debug)
-                    render_pixel(screen,x,y,z,tx,ty,debug)
-                end
-            )
+            if not (cull(a,b,c) > 0) then
+                raster_triangle(
+                    transform_screen_space(a,w,h),
+                    transform_screen_space(b,w,h),
+                    transform_screen_space(c,w,h),
+                    {tex=tex,w=tex:getWidth(),h=tex:getHeight()},
+                    function(x,y,z,tx,ty,debug)
+                        render_pixel(screen,x,y,z,tx,ty,debug)
+                    end
+                )
+            end
         end
     end
     local sc = {}
@@ -503,7 +521,7 @@ function love.wheelmoved(dx,dy)
 end
 
 function love.resize()
-    local res = 10
+    local res = 3
     worg,horg = love.graphics.getDimensions()
     w = worg / res
     h = horg / res
