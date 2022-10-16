@@ -68,7 +68,7 @@ love.window.setMode(worg,horg,{resizable=true})
 local w = worg / res
 local h = horg / res
 
-local const = 0
+local const = 50
 
 local function getT(a,b,p)
     local v1 = {a[1]-b[1], a[2]-b[2]}
@@ -286,7 +286,6 @@ end
 local tex
 function love.load()
     tex = love.image.newImageData("jesus.png")
-    per = makePerspective(w,h,-0.5,90,90)
 end
 
 local function printt(t)
@@ -399,7 +398,7 @@ local function handle_triangle(tri_list,a,b,c)
 end
 
 function love.draw()
-    local per = makePerspective(w,h,-0.5,90,50)
+    local per = makePerspective(w,h,-0.5,1000,const)
     local screen = {}
 
     for k,v in pairs(objects) do
@@ -448,7 +447,7 @@ function love.draw()
         for i=1,#triangles do
             local t = triangles[i]
             local a,b,c = t[1],t[2],t[3]
-            if not (cull(a,b,c) > 0) then
+            if cull(a,b,c) > 0 then
                 raster_triangle(
                     transform_screen_space(a,w,h),
                     transform_screen_space(b,w,h),
@@ -518,6 +517,7 @@ function love.mousepressed(x,y,b)
 end
 
 function love.wheelmoved(dx,dy)
+    const = const + dy
 end
 
 function love.resize()
@@ -525,6 +525,4 @@ function love.resize()
     worg,horg = love.graphics.getDimensions()
     w = worg / res
     h = horg / res
-
-    per = makePerspective(w,h,-0.5,90,50)
 end
