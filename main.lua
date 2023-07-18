@@ -9,7 +9,7 @@ local function v(v)
     return v/4
 end
 
---[[local objects = {
+local objects = {
     {
         verts={
             -s,-s,-s, u(1) ,v(0),
@@ -36,9 +36,9 @@ end
             13,4,8,  13,8,14
         }
     },
-}]]
+}
 
-local objects = {
+--[[local objects = {
     {
         verts={
             -s,-s,-s, 0,1,
@@ -59,16 +59,16 @@ local objects = {
             1,2,5, 2,6,5
         }
     },
-}
+}]]
 
-local res = 3
+local res = 5
 
 local worg,horg = love.graphics.getDimensions()
 love.window.setMode(worg,horg,{resizable=true})
 local w = worg / res
 local h = horg / res
 
-local const = 50
+local const = 10
 
 local function getT(a,b,p)
     local v1 = {a[1]-b[1], a[2]-b[2]}
@@ -112,15 +112,109 @@ local function cull(a,b,c)
         (a1*b2 - a2*b1)   *i3
 end
 
-local function makePerspective(w,h,n,f,fov)
-    local aspectRatio = 1/w * h
-    fov = math.rad(fov)
+local function makePerspective(w, h, nearPlane, farPlane, fov)
+    local aspectRatio = w/h
+    local fov_rad = math.rad(fov)
+    local tan_half_fov = math.tan(fov_rad * 0.5)
+
+    local A = 1 / (aspectRatio * tan_half_fov)
+    local B = 1 / tan_half_fov
+    local C = (farPlane + nearPlane) / (farPlane - nearPlane)
+    local D = 1
+    local E = -(2 * farPlane * nearPlane) / (farPlane - nearPlane)
+
+    return mat.new(4, 4,
+        A, 0, 0, 0,
+        0, B, 0, 0,
+        0, 0, C, E,
+        0, 0, D, 0
+    )
+end
+
+local sqrt = math.sqrt
+
+local function cross(x1,y1,z1,x2,y2,z2)
+    return y1*z2-z1*y2,
+        z1*x2-x1*z2,
+        x1*y2-y1*x2
+end
+
+local function dot(x1,y1,z1,x2,y2,z2)
+    return x1*x2 + y1*y2 + z1*z2
+end
+
+local function normalize(x,y,z)
+    local len = sqrt(x*x+y*y+z*z)
+    return x/len,y/len,z/len
+end
+
+local function normalize_vector(v)
+    local x,y,z = normalize(v.x,v.y,v.z)
+    return {
+        x=x,
+        y=y,
+        z=z
+    }
+end
+
+local function get_look_vector(yaw,pitch)
+    return normalize_vector{
+        x = math.sin(yaw)*math.cos(pitch),
+        y = -math.sin(pitch),
+        z = math.cos(yaw)*math.cos(pitch)
+    }
+end
+
+local function get_move_vector(yaw)
+    return normalize_vector{
+        x = math.sin(yaw),
+        y = 0,
+        z = math.cos(yaw)
+    }
+end
+
+local function new_vector(x,y,z)
+    return {
+        x = x or 0,
+        y = y or 0,
+        z = z or 0
+    }
+end
+
+local function add_vector(a,b)
+    return {
+        x = a.x + b.x,
+        y = a.y + b.y,
+        z = a.z + b.z
+    }
+end
+
+local function sub_vector(a,b)
+    return {
+        x = a.x - b.x,
+        y = a.y - b.y,
+        z = a.z - b.z
+    }
+end
+
+local function scale_vector(a,scalar)
+    return {
+        x = a.x * scalar,
+        y = a.y * scalar,
+        z = a.z * scalar
+    }
+end
+
+local function makeLookat(fromx,fromy,fromz,atx,aty,atz)
+    local nx,ny,nz = normalize(atx-fromx,aty-fromy,atz-fromz)
+    local ux,uy,uz = normalize(cross(0,1,0,nx,ny,nz))
+    local vx,vy,vz = normalize(cross(nx,ny,nz,ux,uy,uz))
 
     return mat.new(4,4,
-        aspectRatio/math.tan(fov*0.5),0,0,0,
-        0,1/(math.tan(fov*0.5)),0,0,
-        0,0,-f/(f-n),-1,
-        0,0,-f*n/(f-n),1
+        ux,uy,uz,-dot(fromx,fromy,fromz,ux,uy,uz),
+        vx,vy,vz,-dot(fromx,fromy,fromz,vx,vy,vz),
+        nx,ny,nz,-dot(fromx,fromy,fromz,nx,ny,nz),
+        0,0,0,1
     )
 end
 
@@ -132,7 +226,7 @@ local function create_rotation_eulers(eulers)
     local sx = SIN(x)
     local sy = SIN(y)
     local sz = SIN(z)
-    
+
     local cx = COS(x)
     local cy = COS(y)
     local cz = COS(z)
@@ -161,10 +255,10 @@ local function get_bary_coord(x,y,p1,p2,p3)
     return {ba,bb,1-ba-bb}
 end
 
-local function interpolate_uv(bary,uv1,uv2,uv3)
+local function interpolate_uv(bary_a,bary_b,bary_c,uv1,uv2,uv3)
     return {
-        uv1[5] * bary[1] + uv2[5] * bary[2] + uv3[5] * bary[3],
-        uv1[6] * bary[1] + uv2[6] * bary[2] + uv3[6] * bary[3]
+        uv1[5] * bary_a + uv2[5] * bary_b + uv3[5] * bary_c,
+        uv1[6] * bary_a + uv2[6] * bary_b + uv3[6] * bary_c
     }
 end
 
@@ -203,8 +297,8 @@ local function draw_flat_top_triangle(v0,v1,v2,tex,origin,fragment)
             local z = 1/lerp(w1,w2,t3)
 
             fragment(x,y,lerp(z1,z2,t3),
-                MAX(0,MIN(CEIL(tpos[1]*z*tex.w),tex.w-1)),
-                MAX(0,MIN(CEIL(tpos[2]*z*tex.h),tex.h-1)),{t3=t3,u=tpos[1],v=tpos[2]}
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{t3=origin[1],r=bary[1],g=bary[2],b=bary[3]}
             )
         end
     end
@@ -244,11 +338,28 @@ local function draw_flat_bottom_triangle(v0,v1,v2,tex,origin,fragment)
             local z = 1/lerp(w1,w2,t3)
 
             fragment(x,y,lerp(z1,z2,t3),
-                MAX(0,MIN(CEIL(tpos[1]*z*tex.w),tex.w-1)),
-                MAX(0,MIN(CEIL(tpos[2]*z*tex.h),tex.h-1)),{t3=t3,u=tpos[1],v=tpos[2]}
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{t3=m0,r=bary[1],g=bary[2],b=bary[3]}
             )
         end
     end
+end
+
+local function slope(x1,y1,x2,y2)
+    return (y2-y1)/(x2-x1)
+end
+
+local function bary(x,y,p1,p2,p3)
+    local p23y_delta,p13x_delta,p32x_delta = p2[2]-p3[2],p1[1]-p3[1],p3[1]-p2[1]
+
+    local xp3_delta,yp3_delta = x-p3[1],y-p3[2]
+
+    local div = (p23y_delta*p13x_delta + p32x_delta*(p1[2]-p3[2]))
+
+    local dot_a = (p23y_delta*xp3_delta    + p32x_delta*yp3_delta) / div
+    local dot_b = ((p3[2]-p1[2])*xp3_delta + p13x_delta*yp3_delta) / div
+
+    return dot_a,dot_b,1-dot_a-dot_b
 end
 
 local function raster_triangle(p1,p2,p3,tex,frag)
@@ -264,7 +375,7 @@ local function raster_triangle(p1,p2,p3,tex,frag)
         draw_flat_bottom_triangle(p1,p2,p3,tex,ori,frag)
     else
         local alpha_split = (p2[2]-p1[2]) / (p3[2]-p1[2])
-        local split_vertex = { 
+        local split_vertex = {
             lerp(p1[1],p3[1],alpha_split),
             lerp(p1[2],p3[2],alpha_split),
             lerp(p1[3],p3[3],alpha_split),
@@ -272,7 +383,7 @@ local function raster_triangle(p1,p2,p3,tex,frag)
             lerp(p1[5],p3[5],alpha_split),
             lerp(p1[6],p3[6],alpha_split)
         }
-        
+
         if p2[1] < split_vertex[1] then
             draw_flat_bottom_triangle(p1,p2,split_vertex,tex,ori,frag)
             draw_flat_top_triangle   (p2,split_vertex,p3,tex,ori,frag)
@@ -283,9 +394,284 @@ local function raster_triangle(p1,p2,p3,tex,frag)
     end
 end
 
+
+local function raster_triangle(p1,p2,p3,tex,frag)
+    if p1[2] > p3[2] then p1,p3 = p3,p1 end
+    if p1[2] > p2[2] then p1,p2 = p2,p1 end
+    if p2[2] > p3[2] then p2,p3 = p3,p2 end
+
+    local split_alpha = (p2[2]-p1[2])/(p3[2]-p1[2])
+
+    local split_point =  {
+        lerp(p1[1],p3[1],split_alpha),
+        lerp(p1[2],p3[2],split_alpha),
+        lerp(p1[3],p3[3],split_alpha),
+        lerp(p1[4],p3[4],split_alpha),
+        lerp(p1[5],p3[5],split_alpha),
+        lerp(p1[6],p3[6],split_alpha)
+    }
+
+    local left_point,right_point = p2,split_point
+    if left_point[1] > right_point[1] then
+        left_point,right_point = right_point,left_point
+    end
+
+    local delta_left_top  = 1/slope(p1[1],p1[2],left_point[1], left_point[2])
+    local delta_right_top = 1/slope(p1[1],p1[2],right_point[1],right_point[2])
+
+    local delta_left_bottom  = 1/slope(p3[1],p3[2],left_point[1], left_point[2])
+    local delta_right_bottom = 1/slope(p3[1],p3[2],right_point[1],right_point[2])
+
+    local x_left,x_right = p1[1],p1[1]
+    for y=math.ceil(p1[2]),math.ceil(left_point[2])-1 do
+
+        for x=math.floor(x_left-0.5),math.ceil(x_right-0.5) do
+            local bary_a,bary_b,bary_c = bary(math.ceil(x),math.ceil(y),p1,left_point,right_point)
+            local depth = p1[3]*bary_a+left_point[3]*bary_b+right_point[3]*bary_c
+
+            local z = 1 / depth
+
+            local tpos = interpolate_uv(bary_a,bary_b,bary_c,p1,left_point,right_point)
+
+            frag(x,y,depth,
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{r=1,g=1,b=1}
+
+            )
+        end
+
+        x_left,x_right = x_left+delta_left_top,x_right+delta_right_top
+    end
+
+    x_left,x_right = left_point[1],right_point[1]
+    for y=math.ceil(left_point[2]),math.ceil(p3[2]) do
+
+        for x=math.ceil(x_left-0.5),math.ceil(x_right-0.5) do
+            local bary_a,bary_b,bary_c = bary(math.ceil(x),math.ceil(y),left_point,right_point,p3)
+            local depth = left_point[3]*bary_a+right_point[3]*bary_b+p3[3]*bary_c
+
+            local tpos =  interpolate_uv(bary_a,bary_b,bary_c,left_point,right_point,p3)
+
+            local z = 1 / depth
+
+            frag(x,y,depth,
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{r=1,g=1,b=1}
+
+            )
+        end
+
+        x_left,x_right = x_left+delta_left_bottom,x_right+delta_right_bottom
+    end
+end
+
+local function raster_triangle(p1,p2,p3,tex,frag)
+    if p1[2] > p3[2] then p1,p3 = p3,p1 end
+    if p1[2] > p2[2] then p1,p2 = p2,p1 end
+    if p2[2] > p3[2] then p2,p3 = p3,p2 end
+
+    local split_alpha = (p2[2]-p1[2])/(p3[2]-p1[2])
+
+    local split_point =  {
+        lerp(p1[1],p3[1],split_alpha),
+        lerp(p1[2],p3[2],split_alpha),
+        lerp(p1[3],p3[3],split_alpha),
+        lerp(p1[4],p3[4],split_alpha),
+        lerp(p1[5],p3[5],split_alpha),
+        lerp(p1[6],p3[6],split_alpha)
+    }
+
+    local left_point,right_point = p2,split_point
+    if left_point[1] > right_point[1] then
+        left_point,right_point = right_point,left_point
+    end
+
+    local row_top_min = math.max(0,math.floor(p1[2]+0.5))
+    local mid_y_floored = math.floor(p2[2]+0.5)
+    local row_top_max = mid_y_floored-1
+    local row_bottom_min = math.max(mid_y_floored,0)
+    local row_bottom_max = math.ceil(p3[2]-0.5)
+
+    local top_delta_y = left_point[2]-p1[2]
+    local top_left_gradient = (left_point[1]-p1[1])/top_delta_y
+    local top_right_gradient = (right_point[1]-p1[1])/top_delta_y
+
+    local top_projection = row_top_min + 0.5 - p1[2]
+    local top_left_x = p1[1] + top_left_gradient * top_projection
+    local top_right_x = p1[1] + top_right_gradient * top_projection
+
+    for y=row_top_min,row_top_max do
+        local collumn_min = math.ceil(top_left_x-0.5)
+        local collumn_max = math.ceil(top_right_x-0.5)-1
+
+        for x=collumn_min,collumn_max do
+            local bary_a,bary_b,bary_c = bary(x,y,left_point,right_point,p3)
+            local depth = left_point[3]*bary_a+right_point[3]*bary_b+p3[3]*bary_c
+
+            local tpos =  interpolate_uv(bary_a,bary_b,bary_c,left_point,right_point,p3)
+
+            local z = 1 / depth
+
+            frag(x,y,depth,
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{r=1,g=1,b=1}
+
+            )
+        end
+
+        top_left_x = top_left_x + top_left_gradient
+        top_right_x = top_right_x + top_right_gradient
+    end
+
+    local bottom_delta_y = p3[2] - left_point[2]
+    local bottom_left_gradient = (p3[1]-left_point[1]) / bottom_delta_y
+    local bottom_right_gradient = (p3[1]-right_point[1]) / bottom_delta_y
+
+    local bottom_projection = row_bottom_min + 0.5 - left_point[2]
+    local bottom_left_x = left_point[1] + bottom_left_gradient * bottom_projection
+    local bottom_right_x = right_point[1] + bottom_right_gradient * bottom_projection
+
+    for y=row_bottom_min,row_bottom_max do
+        local collumn_min = math.ceil(bottom_left_x - 0.5)
+        local collumn_max = math.ceil(bottom_right_x - 0.5) - 1
+
+        for x=collumn_min,collumn_max do
+            local bary_a,bary_b,bary_c = bary(x,y,left_point,right_point,p3)
+            local depth = left_point[3]*bary_a+right_point[3]*bary_b+p3[3]*bary_c
+
+            local tpos =  interpolate_uv(bary_a,bary_b,bary_c,left_point,right_point,p3)
+
+            local z = 1 / depth
+
+            frag(x,y,depth,
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{r=1,g=1,b=1}
+
+            )
+        end
+
+        bottom_left_x = bottom_left_x + bottom_left_gradient
+        bottom_right_x = bottom_right_x + bottom_right_gradient
+    end
+end
+
+local function round_x(x)
+    return math.ceil(x-0.5)
+end
+local function round_y(y)
+    return math.floor(y+0.5)
+end
+
+local function round_xy(x,y)
+    return round_x(x),round_y(y)
+end
+
+local function round_vertex(vertex)
+    vertex[1],vertex[2] = round_xy(vertex[1],vertex[2])
+end
+
+local function bary(x,y,p1,p2,p3)
+    --[[round_vertex(p1)
+    round_vertex(p2)
+    round_vertex(p3)]]
+
+    local p23y_delta,p13x_delta,p32x_delta = p2[2]-p3[2],p1[1]-p3[1],p3[1]-p2[1]
+
+    local xp3_delta,yp3_delta = x-p3[1],y-p3[2]
+
+    local div = (p23y_delta*p13x_delta + p32x_delta*(p1[2]-p3[2]))
+
+    local dot_a = (p23y_delta*xp3_delta    + p32x_delta*yp3_delta) / div
+    local dot_b = ((p3[2]-p1[2])*xp3_delta + p13x_delta*yp3_delta) / div
+
+    return dot_a,dot_b,1-dot_a-dot_b
+end
+
+local function raster_triangle(p1,p2,p3,tex,frag)
+    if p1[2] > p3[2] then p1,p3 = p3,p1 end
+    if p1[2] > p2[2] then p1,p2 = p2,p1 end
+    if p2[2] > p3[2] then p2,p3 = p3,p2 end
+
+    local split_alpha = (p2[2]-p1[2])/(p3[2]-p1[2])
+
+    local split_point =  {
+        lerp(p1[1],p3[1],split_alpha),
+        lerp(p1[2],p3[2],split_alpha),
+        lerp(p1[3],p3[3],split_alpha),
+        lerp(p1[4],p3[4],split_alpha),
+        lerp(p1[5],p3[5],split_alpha),
+        lerp(p1[6],p3[6],split_alpha)
+    }
+
+    local left_point,right_point = p2,split_point
+    if left_point[1] > right_point[1] then
+        left_point,right_point = right_point,left_point
+    end
+
+    local delta_left_top  = 1/slope(p1[1],p1[2],left_point[1], left_point[2])
+    local delta_right_top = 1/slope(p1[1],p1[2],right_point[1],right_point[2])
+
+    local delta_left_bottom  = 1/slope(p3[1],p3[2],left_point[1], left_point[2])
+    local delta_right_bottom = 1/slope(p3[1],p3[2],right_point[1],right_point[2])
+
+    -- flat bottom
+    local top_projection = math.floor(p1[2]+0.5) + 0.5 - p1[2]
+    local bottom_projection = math.floor(p2[2]+0.5) + 0.5 - left_point[2]
+
+    local x_left,x_right = p1[1] + delta_left_top * top_projection,p1[1] + delta_right_top * top_projection
+    if delta_left_top then
+    for y=math.floor(p1[2]+0.5),math.floor(p2[2]+0.5)-1 do
+
+        for x=math.ceil(x_left-0.5),math.ceil(x_right-0.5)-1 do
+
+            local bary_a,bary_b,bary_c = bary(x,y,p1,left_point,right_point)
+            local depth = p1[3]*bary_a+left_point[3]*bary_b+right_point[3]*bary_c
+
+            local z = 1 / depth
+
+            local tpos = interpolate_uv(bary_a,bary_b,bary_c,p1,left_point,right_point)
+
+            frag(x,y,depth,
+                MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{r=depth,g=depth,b=depth}
+
+            )
+        end
+
+        x_left,x_right = x_left+delta_left_top,x_right+delta_right_top
+    end
+    end
+
+
+    -- flat top
+    if delta_left_bottom == delta_left_bottom then
+        x_left,x_right = left_point[1] + delta_left_bottom * bottom_projection,right_point[1] + delta_right_bottom * bottom_projection
+        for y=math.floor(p2[2]+0.5),math.ceil(p3[2]-0.5) do
+
+            for x=math.ceil(x_left-0.5),math.ceil(x_right-0.5)-1 do
+
+                local bary_a,bary_b,bary_c = bary(x,y,left_point,right_point,p3)
+                local depth = left_point[3]*bary_a+right_point[3]*bary_b+p3[3]*bary_c
+
+                local tpos =  interpolate_uv(bary_a,bary_b,bary_c,left_point,right_point,p3)
+
+                local z = 1 / depth
+
+                frag(x,y,depth,
+                    MAX(0,MIN(CEIL(tpos[1]*z*(tex.w+res)),tex.w)-1),
+                    MAX(0,MIN(CEIL(tpos[2]*z*(tex.h+res)),tex.h)-1),{r=depth,g=depth,b=depth}
+
+                )
+            end
+
+            x_left,x_right = x_left+delta_left_bottom,x_right+delta_right_bottom
+        end
+    end
+end
+
 local tex
 function love.load()
-    tex = love.image.newImageData("jesus.png")
+    tex = love.image.newImageData("dice_skin.png")
 end
 
 local function printt(t)
@@ -294,38 +680,36 @@ local function printt(t)
     error(str)
 end
 
-local rx,ry,rz,px,py,pz = 0,0,0,0,0,0
+local pitch,yaw = 0,0
+local camera_pos = new_vector(0,0,-2)
 
 local scale = mat.new(4,4,
-    1,0,0,0,
-    0,1,0,0,
-    0,0,1,0,
-    0,0,0,1
+    3,0,0,0,
+    0,3,0,0,
+    0,0,3,0,
+    0,0,0,3
 )
 
 local die = false
 local selected_pixels = {}
 
 local function render_pixel(screen,x,y,z,tx,ty,debug)
-    local r,g,b,a = tex:getPixel(tx,ty)
-    --local r,g,b,a = debug.u,0,debug.v,1
+    local r,g,b,a = debug.r,debug.g,debug.b,1
+    local _r,_g,_b,_a = tex:getPixel(tx,ty)
+    --local r,g,b = r*_r,g*_g,b*_b
+        --local r,g,b,a = debug.u,0,debug.v,1
 
     if a > 0.5 then
 
         if not screen[y] then screen[y] = {} end
-        if screen[y] and screen[y][x] and screen[y][x].w and screen[y][x].w > z then
+        if screen[y] and screen[y][x] and screen[y][x].w and screen[y][x].w < z then
             if selected_pixels[x] and selected_pixels[x][y] then
                 screen[y][x] = {w=0,1,0,0,1}
-                print(debug.t3)
             else
                 screen[y][x] = {w=z,r,g,b,1}
             end
         elseif not screen[y][x] then
-            if selected_pixels[x*res] and selected_pixels[x][y] then
-                screen[y][x] = {w=0,1,0,0,1}
-            else
-                screen[y][x] = {w=z,r,g,b,1}
-            end
+            screen[y][x] = {w=z,r,g,b,1}
         end
 
     end
@@ -369,10 +753,15 @@ local function handle_triangle(tri_list,a,b,c)
     local v3x,v3y,v3z,v3w = c[1],c[2],c[3],c[4]
 
     if v1x >  v1w and v2x >  v2w and v3x >  v3w then return end
+
     if v1x < -v1w and v2x < -v2w and v3x < -v3w then return end
+
     if v1y >  v1w and v2y >  v2w and v3y >  v3w then return end
+
     if v1y < -v1w and v2y < -v2w and v3y < -v3w then return end
+
     if v1z >  v1w and v2z > -v2w and v3z >  v3w then return end
+
     if v1z < 0    and v2z < 0    and v3z < 0    then return end
 
     if v1z < 0 then
@@ -398,8 +787,14 @@ local function handle_triangle(tri_list,a,b,c)
 end
 
 function love.draw()
-    local per = makePerspective(w,h,-0.5,1000,const)
+    local per = makePerspective(w,h,const/100,10,70)
     local screen = {}
+
+    local fx,fy,fz = camera_pos.x,camera_pos.y,camera_pos.z
+    local look_vector = add_vector(camera_pos,get_look_vector(math.rad(yaw),math.rad(pitch)))
+    local ax,ay,az = look_vector.x,look_vector.y,look_vector.z
+
+    local lookat = makeLookat(fx,fy,fz,ax,ay,az)
 
     for k,v in pairs(objects) do
         local vertices = {}
@@ -416,17 +811,12 @@ function love.draw()
             )*scale
 
             local rotated_vertice = scaled_vertice*create_rotation_eulers{
-                x=rx,
-                y=ry,
-                z=rz
+                x=0,
+                y=0,
+                z=0
             }
 
-            local model = rotated_vertice*mat.new(4,4,
-                1,0,0,0,
-                0,1,0,0,
-                0,0,1,0,
-                px,py,pz,1
-            )
+            local model = rotated_vertice*lookat
 
             local v = model*per
 
@@ -447,7 +837,7 @@ function love.draw()
         for i=1,#triangles do
             local t = triangles[i]
             local a,b,c = t[1],t[2],t[3]
-            if cull(a,b,c) > 0 then
+            --if cull(a,b,c) > 0 then
                 raster_triangle(
                     transform_screen_space(a,w,h),
                     transform_screen_space(b,w,h),
@@ -457,7 +847,7 @@ function love.draw()
                         render_pixel(screen,x,y,z,tx,ty,debug)
                     end
                 )
-            end
+            --end
         end
     end
     local sc = {}
@@ -474,36 +864,45 @@ function love.draw()
     if die then error("finished frame") end
 end
 
+local pitch_lim = {-89,89}
+local speed = 0.05
+
 function love.update(dt)
     if love.keyboard.isDown("up") then
-        rx = rx - 100*dt
+        local new_pitch = pitch - 100*dt
+        if new_pitch > pitch_lim[1] then pitch = new_pitch end
     end
     if love.keyboard.isDown("down") then
-        rx = rx + 100*dt
+        local new_pitch = pitch + 100*dt
+        if new_pitch < pitch_lim[2] then pitch = new_pitch end
     end
     if love.keyboard.isDown("left") then
-        ry = ry - 100*dt
+        yaw = yaw - 100*dt
     end
     if love.keyboard.isDown("right") then
-        ry = ry + 100*dt
+        yaw = yaw + 100*dt
     end
     if love.keyboard.isDown("a") then
-        px = px - 2*dt
+        local move_vector = get_move_vector(math.rad(yaw-90))
+        camera_pos = add_vector(camera_pos,scale_vector(move_vector,speed))
     end
     if love.keyboard.isDown("d") then
-        px = px + 2*dt
+        local move_vector = get_move_vector(math.rad(yaw+90))
+        camera_pos = add_vector(camera_pos,scale_vector(move_vector,speed))
     end
     if love.keyboard.isDown("w") then
-        pz = pz - 2*dt
+        local move_vector = get_move_vector(math.rad(yaw))
+        camera_pos = add_vector(camera_pos,scale_vector(move_vector,speed))
     end
     if love.keyboard.isDown("s") then
-        pz = pz + 2*dt
+        local move_vector = get_move_vector(math.rad(yaw))
+        camera_pos = sub_vector(camera_pos,scale_vector(move_vector,speed))
     end
     if love.keyboard.isDown("lctrl") then
-        py = py - 2*dt
+        camera_pos = add_vector(camera_pos,scale_vector(new_vector(0,-1,0),speed))
     end
     if love.keyboard.isDown("lshift") then
-        py = py + 2*dt
+        camera_pos = add_vector(camera_pos,scale_vector(new_vector(0,1,0),speed))
     end
     if love.keyboard.isDown("space") then
         die = true
@@ -521,7 +920,7 @@ function love.wheelmoved(dx,dy)
 end
 
 function love.resize()
-    local res = 3
+    local res = 5
     worg,horg = love.graphics.getDimensions()
     w = worg / res
     h = horg / res

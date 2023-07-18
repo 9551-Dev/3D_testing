@@ -1,23 +1,17 @@
 local matrice = {}
 
-local function matrix_multiply(a, b)
-    local m = {}
-    m.matrix_height = a.matrix_height
-    m.matrix_width = b.matrix_width
-    for y=0,a.matrix_height-1 do
-        for x=0,b.matrix_width-1 do
-            local sum = 0
-            for i=0,a.matrix_width-1 do
-                sum = sum + a[y*a.matrix_width+i+1]*b[i*b.matrix_width+x+1]
-            end
-            m[y*b.matrix_width+x+1] = sum
-        end
-    end
-    return m
+local function matmul(vec, b)
+    local a1, a2, a3, a4 = vec[1],vec[2],vec[3],vec[4]
+    return {
+          a1 * b[1]  + a2 * b[2]  + a3 * b[3]  + a4 * b[4],
+          a1 * b[5]  + a2 * b[6]  + a3 * b[7]  + a4 * b[8],
+          a1 * b[9]  + a2 * b[10] + a3 * b[11] + a4 * b[12],
+          a1 * b[13] + a2 * b[14] + a3 * b[15] + a4 * b[16]
+    }
 end
 
 local function attacher(self,matrice)
-    return setmetatable(matrix_multiply(self,matrice),{
+    return setmetatable(matmul(self,matrice),{
         __mul=attacher,
     })
 end
