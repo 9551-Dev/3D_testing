@@ -3,7 +3,7 @@ local s = 0.5
 local mat = require("mat")
 
 local function u(u)
-    return (u+1)/3
+    return u/3
 end
 local function v(v)
     return v/4
@@ -12,28 +12,28 @@ end
 local objects = {
     {
         verts={
-            -s,-s,-s, u(1) ,v(0),
-            s,-s,-s,  u(0) ,v(0),
-            -s,s,-s,  u(1) ,v(1),
-            s,s,-s,   u(0) ,v(1),
-            -s,-s,s,  u(1) ,v(3),
-            s,-s,s,   u(0) ,v(3),
-            -s,s,s,   u(1) ,v(2),
-            s,s,s,    u(0) ,v(2),
-            -s,-s,-s, u(1) ,v(4),
-            s,-s,-s,  u(0) ,v(4),
-            -s,-s,-s, u(2) ,v(1),
-            -s,-s,s,  u(2) ,v(2),
-            s,-s,-s,  u(-1),v(1),
-            s,-s,s,   u(-1),v(2),
+            -s,-s,-s, u(2),v(0),
+            s,-s,-s,  u(1),v(0),
+            -s,s,-s,  u(2),v(1),
+            s,s,-s,   u(1),v(1),
+            -s,-s,s,  u(2),v(3),
+            s,-s,s,   u(1),v(3),
+            -s,s,s,   u(2),v(2),
+            s,s,s,    u(1),v(2),
+            -s,-s,-s, u(2),v(4),
+            s,-s,-s,  u(1),v(4),
+            -s,-s,-s, u(3),v(1),
+            -s,-s,s,  u(3),v(2),
+            s,-s,-s,  u(0),v(1),
+            s,-s,s,   u(0),v(2),
         },
         indices={
-            1,3,2,   3,4,2,
-            5,9,6,   6,9,10,
-            3,7,4,   4,7,8,
-            5,6,8,   5,8,7,
-            3,11,12, 3,12,7,
-            13,4,8,  13,8,14
+            2,3,1,   2,4,3,
+            6,9,5,   10,9,6,
+            4,7,3,   8,7,4,
+            8,6,5,   7,8,5,
+            12,11,3, 7,12,3,
+            8,4,13,  14,8,13
         }
     },
 }
@@ -90,7 +90,7 @@ local function transform_screen_space(p,w,h)
         ( p[1]*inverse_z+1)*w/2,
         (-p[2]*inverse_z+1)*h/2,
         inverse_z,
-        p[4],
+        --p[4],
         p[5]*inverse_z,
         p[6]*inverse_z
     }
@@ -587,7 +587,7 @@ local function bary(x,y,p1,p2,p3)
     return dot_a,dot_b,1-dot_a-dot_b
 end
 
-local function raster_triangle(p1,p2,p3,tex,frag)
+--[[local function raster_triangle(p1,p2,p3,tex,frag)
     if p1[2] > p3[2] then p1,p3 = p3,p1 end
     if p1[2] > p2[2] then p1,p2 = p2,p1 end
     if p2[2] > p3[2] then p2,p3 = p3,p2 end
@@ -667,11 +667,125 @@ local function raster_triangle(p1,p2,p3,tex,frag)
             x_left,x_right = x_left+delta_left_bottom,x_right+delta_right_bottom
         end
     end
+end]]
+
+local function raster_triangle(p1, p2, p3, tex, frag)
+    if p1[2] > p3[2] then p1, p3 = p3, p1 end
+    if p1[2] > p2[2] then p1, p2 = p2, p1 end
+    if p2[2] > p3[2] then p2, p3 = p3, p2 end
+
+    local split_alpha = (p2[2] - p1[2]) / (p3[2] - p1[2])
+    local split_x = (1 - split_alpha) * p1[1] + split_alpha * p3[1]
+    local split_y = (1 - split_alpha) * p1[2] + split_alpha * p3[2]
+    local split_z = (1 - split_alpha) * p1[3] + split_alpha * p3[3]
+    local split_u = (1 - split_alpha) * p1[4] + split_alpha * p3[4]
+    local split_v = (1 - split_alpha) * p1[5] + split_alpha * p3[5]
+
+    local left_point, right_point = p2, { split_x, split_y, split_z ,split_u, split_v}
+    if left_point[1] > right_point[1] then
+        left_point, right_point = right_point, left_point
+    end
+
+    local delta_left_top     = 1 / slope(p3[1], p3[2], left_point[1], left_point[2])
+    local delta_right_top    = 1 / slope(p3[1], p3[2], right_point[1], right_point[2])
+    local delta_left_bottom  = 1 / slope(p1[1], p1[2], left_point[1], left_point[2])
+    local delta_right_bottom = 1 / slope(p1[1], p1[2], right_point[1], right_point[2])
+
+    local subpixel_top    = math.floor(p1[2] + 0.5) + 0.5 - p1[2]
+    local subpixel_bottom = math.floor(p2[2] + 0.5) + 0.5 - left_point[2]
+
+    local delta_z_left,delta_z_right
+    local delta_u_left,delta_u_right
+    local delta_v_left,delta_v_right
+
+    if delta_left_top then
+        delta_z_left  = (p3[3] - left_point[3])  / (p3[2] - left_point[2])
+        delta_z_right = (p3[3] - right_point[3]) / (p3[2] - right_point[2])
+
+        delta_u_left  = (p3[4] - left_point[4])  / (p3[2] - left_point[2])
+        delta_u_right = (p3[4] - right_point[4]) / (p3[2] - right_point[2])
+
+        delta_v_left  = (p3[5] - left_point[5])  / (p3[2] - left_point[2])
+        delta_v_right = (p3[5] - right_point[5]) / (p3[2] - right_point[2])
+
+
+        local x_left,x_right = left_point[1] + delta_left_top * subpixel_bottom, right_point[1] + delta_right_top * subpixel_bottom
+        local z_left,z_right = left_point[3] + delta_z_left   * subpixel_bottom, right_point[3] + delta_z_right   * subpixel_bottom
+        local u_left,u_right = left_point[4] + delta_u_left   * subpixel_bottom, right_point[4] + delta_u_right   * subpixel_bottom
+        local v_left,v_right = left_point[5] + delta_v_left   * subpixel_bottom, right_point[5] + delta_v_right   * subpixel_bottom
+
+        for y = math.floor(p2[2] + 0.5), math.ceil(p3[2] - 0.5) do
+            local delta_z = (z_right - z_left) / (x_right - x_left)
+            local delta_u = (u_right - u_left) / (x_right - x_left)
+            local delta_v = (v_right - v_left) / (x_right - x_left)
+            local z       = z_left
+            local u       = u_left
+            local v       = v_left
+            for x = math.ceil(x_left - 0.5), math.ceil(x_right - 0.5) - 1 do
+                local depth = 1 / z
+
+                local tx = math.ceil(u*(tex.w-1)*depth-0.5)%(tex.w-1)
+                local ty = math.ceil(v*(tex.h-1)*depth-0.5)%(tex.h-1)
+
+                frag(x, y, depth, tx, ty, {r=z,g=z,b=z})
+                z = z + delta_z
+                u = u + delta_u
+                v = v + delta_v
+            end
+
+            x_left, x_right = x_left + delta_left_top, x_right + delta_right_top
+            z_left, z_right = z_left + delta_z_left,   z_right + delta_z_right
+            u_left, u_right = u_left + delta_u_left,   u_right + delta_u_right
+            v_left, v_right = v_left + delta_v_left,   v_right + delta_v_right
+        end
+    end
+
+    if delta_left_bottom then
+        delta_z_left  = (p1[3] - left_point[3])  / (p1[2] - left_point[2])
+        delta_z_right = (p1[3] - right_point[3]) / (p1[2] - right_point[2])
+
+        delta_u_left  = (p1[4] - left_point[4])  / (p1[2] - left_point[2])
+        delta_u_right = (p1[4] - right_point[4]) / (p1[2] - right_point[2])
+
+        delta_v_left  = (p1[5] - left_point[5])  / (p1[2] - left_point[2])
+        delta_v_right = (p1[5] - right_point[5]) / (p1[2] - right_point[2])
+
+        local x_left, x_right = p1[1] + delta_left_bottom * subpixel_top, p1[1] + delta_right_bottom * subpixel_top
+        local z_left, z_right = p1[3] + delta_z_left      * subpixel_top, p1[3] + delta_z_right      * subpixel_top
+        local u_left, u_right = p1[4] + delta_u_left      * subpixel_top, p1[4] + delta_u_right      * subpixel_top
+        local v_left, v_right = p1[5] + delta_v_left      * subpixel_top, p1[5] + delta_v_right      * subpixel_top
+
+        for y = math.floor(p1[2] + 0.5), math.floor(p2[2] + 0.5) - 1 do
+            local delta_z = (z_right - z_left) / (x_right - x_left)
+            local delta_u = (u_right - u_left) / (x_right - x_left)
+            local delta_v = (v_right - v_left) / (x_right - x_left)
+            local z       = z_left
+            local u       = u_left
+            local v       = v_left
+
+            for x = math.ceil(x_left - 0.5), math.ceil(x_right - 0.5) - 1 do
+                local depth = 1 / z
+
+                local tx = math.ceil(u*(tex.w-1)*depth-0.5)%(tex.w-1)
+                local ty = math.ceil(v*(tex.h-1)*depth-0.5)%(tex.h-1)
+
+                frag(x, y, depth, tx, ty, {r=z,g=z,b=z})
+                z = z + delta_z
+                u = u + delta_u
+                v = v + delta_v
+            end
+
+            x_left, x_right = x_left + delta_left_bottom, x_right + delta_right_bottom
+            z_left, z_right = z_left + delta_z_left,      z_right + delta_z_right
+            u_left, u_right = u_left + delta_u_left,      u_right + delta_u_right
+            v_left, v_right = v_left + delta_v_left,      v_right + delta_v_right
+        end
+    end
 end
 
 local tex
 function love.load()
-    tex = love.image.newImageData("dice_skin.png")
+    tex = love.image.newImageData("test_cube.png")
 end
 
 local function printt(t)
@@ -694,15 +808,16 @@ local die = false
 local selected_pixels = {}
 
 local function render_pixel(screen,x,y,z,tx,ty,debug)
-    local r,g,b,a = debug.r,debug.g,debug.b,1
-    local _r,_g,_b,_a = tex:getPixel(tx,ty)
-    --local r,g,b = r*_r,g*_g,b*_b
-        --local r,g,b,a = debug.u,0,debug.v,1
+    --local r,g,b,a = debug.r,debug.g,debug.b,1
+    if not (tx == tx) or not (ty == ty) then return end
+    local r,g,b = tex:getPixel(tx,ty)
+    --local r,g,b,a = debug.u,0,debug.v,1
 
-    if a > 0.5 then
+    --if a < 0.5 then
+    if x == x and y == y then
 
         if not screen[y] then screen[y] = {} end
-        if screen[y] and screen[y][x] and screen[y][x].w and screen[y][x].w < z then
+        if screen[y] and screen[y][x] and screen[y][x].w and screen[y][x].w > z then
             if selected_pixels[x] and selected_pixels[x][y] then
                 screen[y][x] = {w=0,1,0,0,1}
             else
@@ -711,8 +826,9 @@ local function render_pixel(screen,x,y,z,tx,ty,debug)
         elseif not screen[y][x] then
             screen[y][x] = {w=z,r,g,b,1}
         end
-
     end
+
+    --end
 end
 
 local function interpolate_vertex(v1,v2,alpha)
@@ -787,7 +903,7 @@ local function handle_triangle(tri_list,a,b,c)
 end
 
 function love.draw()
-    local per = makePerspective(w,h,const/100,10,70)
+    local per = makePerspective(w,h,const/100,10,90)
     local screen = {}
 
     local fx,fy,fz = camera_pos.x,camera_pos.y,camera_pos.z
@@ -837,7 +953,7 @@ function love.draw()
         for i=1,#triangles do
             local t = triangles[i]
             local a,b,c = t[1],t[2],t[3]
-            --if cull(a,b,c) > 0 then
+            if cull(a,b,c) > 0 then
                 raster_triangle(
                     transform_screen_space(a,w,h),
                     transform_screen_space(b,w,h),
@@ -847,7 +963,7 @@ function love.draw()
                         render_pixel(screen,x,y,z,tx,ty,debug)
                     end
                 )
-            --end
+            end
         end
     end
     local sc = {}
